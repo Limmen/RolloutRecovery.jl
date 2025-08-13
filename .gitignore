@@ -1,0 +1,31 @@
+# === Julia-related ===
+*.jl.cov             # Coverage files
+*.jl.mem             # Memory profiling files
+*.jl.*.nb.html       # Jupyter notebook HTML exports
+*.jld2               # Binary data files
+
+# === Julia compiled cache ===
+.julia/compiled/
+.julia/packages/
+
+# === Julia project environment ===
+Manifest.toml        # Optional: ignore if you want reproducible environments
+# Project.toml       # DO NOT ignore if you want dependencies to be tracked
+
+# === VS Code ===
+.vscode/
+
+# === Jupyter Notebooks (IJulia) ===
+.ipynb_checkpoints/
+*.ipynb~
+
+# === Temporary / OS / editor files ===
+*.DS_Store
+*.swp
+*.swo
+*~
+
+
+*.csv
+*.posg
+*.csv
