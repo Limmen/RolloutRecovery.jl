@@ -292,6 +292,40 @@ function generate_observation_tensor(n::Int, X::Vector{Int}, K::Int,
     Returns:
     - Z: Observation probability tensor
     """
+    # Reuse the component observation distributions
+    intrusion_dist, no_intrusion_dist = generate_component_observation_distributions(n)
+
+    num_x, num_o = length(X), length(O)
+    Z = Matrix{Float64}(undef, num_x, num_o)
+
+    @inbounds for (x_idx, x) in enumerate(X)
+        x_vec = x_to_vec[x]
+        row_sum = 0.0
+
+        for (o_idx, o) in enumerate(O)
+            o_vec = o_to_vec[o]
+            probability = compute_observation_likelihood(o_vec, x_vec, intrusion_dist, no_intrusion_dist)
+            Z[x_idx, o_idx] = probability
+            row_sum += probability
+        end
+
+        @assert isapprox(row_sum, 1.0, rtol=0.01) "Observation probabilities do not sum to 1 for state $x"
+    end
+
+    return Z
+end
+
+function generate_component_observation_distributions(n::Int)::Tuple{Vector{Float64}, Vector{Float64}}
+    """
+    Generate the component observation distributions for efficient sampling
+    
+    Args:
+    - n: Maximum observation value
+    
+    Returns:
+    - intrusion_dist: Probability distribution for compromised servers
+    - no_intrusion_dist: Probability distribution for healthy servers
+    """
     intrusion_dist = Vector{Float64}(undef, n + 1)
     no_intrusion_dist = Vector{Float64}(undef, n + 1)
 
@@ -303,31 +337,301 @@ function generate_observation_tensor(n::Int, X::Vector{Int}, K::Int,
         no_intrusion_dist[i+1] = pdf(no_intrusion_rv, i)
     end
 
-    num_x, num_o = length(X), length(O)
-    Z = Matrix{Float64}(undef, num_x, num_o)
+    return intrusion_dist, no_intrusion_dist
+end
 
-    @inbounds for (x_idx, x) in enumerate(X)
-        x_vec = x_to_vec[x]
-        row_sum = 0.0
-
-        for (o_idx, o) in enumerate(O)
-            o_vec = o_to_vec[o]
-            probability = 1.0
-
-            for i in 1:N
-                if x_vec[i] == 0
-                    probability *= no_intrusion_dist[o_vec[i]+1]
-                else
-                    probability *= intrusion_dist[o_vec[i]+1]
-                end
-            end
-
-            Z[x_idx, o_idx] = probability
-            row_sum += probability
-        end
-
-        @assert isapprox(row_sum, 1.0, rtol=0.01) "Observation probabilities do not sum to 1 for state $x"
+function sample_observation_component(component_state::Int, intrusion_dist::Vector{Float64}, 
+                                    no_intrusion_dist::Vector{Float64})::Int
+    """
+    Sample an observation for a single component efficiently
+    
+    Args:
+    - component_state: State of the component (0 = healthy, 1 = compromised)
+    - intrusion_dist: Observation distribution for compromised components
+    - no_intrusion_dist: Observation distribution for healthy components
+    
+    Returns:
+    - Sampled observation value (0-indexed)
+    """
+    if component_state == 0
+        return sample_from_categorical(no_intrusion_dist) - 1
+    else
+        return sample_from_categorical(intrusion_dist) - 1
     end
+end
 
-    return Z
+function sample_observation_vector(state_vec::NTuple{K,Int}, intrusion_dist::Vector{Float64}, 
+                                 no_intrusion_dist::Vector{Float64})::NTuple{K,Int} where K
+    """
+    Sample a complete observation vector by sampling each component independently
+    
+    Args:
+    - state_vec: State vector (each component is 0 = healthy, 1 = compromised)
+    - intrusion_dist: Observation distribution for compromised components
+    - no_intrusion_dist: Observation distribution for healthy components
+    
+    Returns:
+    - Observation vector (each component is 0-indexed)
+    """
+    obs_components = Vector{Int}(undef, K)
+    
+    @inbounds for i in 1:K
+        obs_components[i] = sample_observation_component(state_vec[i], intrusion_dist, no_intrusion_dist)
+    end
+    
+    return NTuple{K,Int}(obs_components)
+end
+
+function compute_observation_likelihood(obs_vec::NTuple{K,Int}, state_vec::NTuple{K,Int},
+                                      intrusion_dist::Vector{Float64}, 
+                                      no_intrusion_dist::Vector{Float64})::Float64 where K
+    """
+    Compute the likelihood of an observation vector given a state vector using factorized structure
+    
+    Args:
+    - obs_vec: Observation vector (0-indexed)
+    - state_vec: State vector (0 = healthy, 1 = compromised)
+    - intrusion_dist: Observation distribution for compromised components
+    - no_intrusion_dist: Observation distribution for healthy components
+    
+    Returns:
+    - Likelihood P(obs_vec | state_vec)
+    """
+    likelihood = 1.0
+    
+    @inbounds for i in 1:K
+        if state_vec[i] == 0
+            likelihood *= no_intrusion_dist[obs_vec[i] + 1]
+        else
+            likelihood *= intrusion_dist[obs_vec[i] + 1]
+        end
+    end
+    
+    return likelihood
+end
+
+function sample_multiple_observation_vectors(state_vec::NTuple{K,Int}, intrusion_dist::Vector{Float64}, 
+                                           no_intrusion_dist::Vector{Float64}, 
+                                           num_samples::Int)::Vector{NTuple{K,Int}} where K
+    """
+    Sample multiple observation vectors efficiently
+    
+    Args:
+    - state_vec: State vector
+    - intrusion_dist: Observation distribution for compromised components
+    - no_intrusion_dist: Observation distribution for healthy components
+    - num_samples: Number of samples to generate
+    
+    Returns:
+    - Vector of observation vectors
+    """
+    observations = Vector{NTuple{K,Int}}(undef, num_samples)
+    
+    @inbounds for i in 1:num_samples
+        observations[i] = sample_observation_vector(state_vec, intrusion_dist, no_intrusion_dist)
+    end
+    
+    return observations
+end
+
+@inline function sample_from_categorical(probs::Vector{Float64})::Int
+    """
+    Efficient categorical sampling using cumulative probabilities
+    Avoids creating Categorical distribution object
+    
+    Args:
+    - probs: Probability vector (must sum to 1)
+    
+    Returns:
+    - Sampled index (1-indexed)
+    """
+    r = rand()
+    cumsum_prob = 0.0
+    
+    @inbounds for i in 1:length(probs)
+        cumsum_prob += probs[i]
+        if r <= cumsum_prob
+            return i
+        end
+    end
+    
+    return length(probs)
+end
+
+function observation_vector_to_index(obs_vec::NTuple{K,Int}, n::Int)::Int where K
+    """
+    Convert observation vector to flat index efficiently without using dictionaries
+    
+    Args:
+    - obs_vec: Observation vector (0-indexed components)
+    - n: Maximum observation value per component
+    
+    Returns:
+    - Flat observation index (0-indexed)
+    """
+    index = 0
+    multiplier = 1
+    
+    @inbounds for i in K:-1:1
+        index += obs_vec[i] * multiplier
+        multiplier *= (n + 1)
+    end
+    
+    return index
+end
+
+function observation_index_to_vector(obs_idx::Int, n::Int, K::Int)::NTuple{K,Int}
+    """
+    Convert flat observation index to vector efficiently
+    
+    Args:
+    - obs_idx: Flat observation index (0-indexed)
+    - n: Maximum observation value per component  
+    - K: Number of components
+    
+    Returns:
+    - Observation vector (0-indexed components)
+    """
+    obs_components = Vector{Int}(undef, K)
+    remaining = obs_idx
+    
+    @inbounds for i in K:-1:1
+        obs_components[i] = remaining % (n + 1)
+        remaining ÷= (n + 1)
+    end
+    
+    return NTuple{K,Int}(obs_components)
+end
+
+function sample_next_state_component(current_state::Int, control::Int, p_a::Float64, 
+                                   num_compromised_neighbors::Int)::Int
+    """
+    Sample the next state for a single component given current state, control, and neighbor info
+    
+    Args:
+    - current_state: Current state of component (0 = healthy, 1 = compromised)
+    - control: Control action for component (0 = continue, 1 = stop)
+    - p_a: Attack probability parameter
+    - num_compromised_neighbors: Number of compromised neighbors
+    
+    Returns:
+    - Next state for the component (0 or 1)
+    """
+    if control == 1 && current_state == 1
+        # Stop action on compromised component always leads to healthy state
+        return 0
+    elseif control == 0
+        if current_state == 1
+            # Compromised component stays compromised if no stop action
+            return 1
+        else
+            # Healthy component: sample compromise probability
+            compromise_probability = min(1.0, p_a * (num_compromised_neighbors + 1))
+            return rand() < compromise_probability ? 1 : 0
+        end
+    else
+        # Stop action on healthy component keeps it healthy
+        return 0
+    end
+end
+
+function sample_next_state_vector(current_state_vec::NTuple{K,Int}, control_vec::NTuple{K,Int}, 
+                                p_a::Float64, A::Matrix{Int})::NTuple{K,Int} where K
+    """
+    Sample the next state vector by sampling each component independently
+    
+    Args:
+    - current_state_vec: Current state vector
+    - control_vec: Control vector
+    - p_a: Attack probability parameter
+    - A: Adjacency matrix for neighbor relationships
+    
+    Returns:
+    - Next state vector
+    """
+    next_state_components = Vector{Int}(undef, K)
+    
+    @inbounds for i in 1:K
+        # Count compromised neighbors for component i
+        num_compromised_neighbors = count_compromised_neighbors(i, A, current_state_vec)
+        
+        # Sample next state for this component
+        next_state_components[i] = sample_next_state_component(
+            current_state_vec[i], control_vec[i], p_a, num_compromised_neighbors
+        )
+    end
+    
+    return NTuple{K,Int}(next_state_components)
+end
+
+function sample_next_state_from_transition_probs(current_state::Int, control::Int, 
+                                                p_a::Float64, x_to_vec::Dict{Int,NTuple{K,Int}}, 
+                                                u_to_vec::Dict{Int,NTuple{K,Int}}, 
+                                                vec_to_x::Dict{NTuple{K,Int},Int}, 
+                                                A::Matrix{Int})::Int where K
+    """
+    Sample next state index efficiently using component-wise sampling
+    
+    Args:
+    - current_state: Current state index
+    - control: Control index
+    - p_a: Attack probability parameter
+    - x_to_vec: State index to vector mapping
+    - u_to_vec: Control index to vector mapping
+    - vec_to_x: State vector to index mapping
+    - A: Adjacency matrix
+    
+    Returns:
+    - Next state index
+    """
+    current_state_vec = x_to_vec[current_state]
+    control_vec = u_to_vec[control]
+    
+    next_state_vec = sample_next_state_vector(current_state_vec, control_vec, p_a, A)
+    
+    return vec_to_x[next_state_vec]
+end
+
+function compute_component_transition_probability(next_state::Int, current_state::Int, 
+                                                control::Int, p_a::Float64, 
+                                                num_compromised_neighbors::Int)::Float64
+    """
+    Compute the transition probability for a single component
+    
+    Args:
+    - next_state: Next state of component (0 or 1)
+    - current_state: Current state of component (0 or 1)
+    - control: Control action for component (0 or 1)
+    - p_a: Attack probability parameter
+    - num_compromised_neighbors: Number of compromised neighbors
+    
+    Returns:
+    - Transition probability P(next_state | current_state, control, neighbors)
+    """
+    return local_transition_probability(next_state, current_state, control, p_a, num_compromised_neighbors)
+end
+
+function sample_multiple_next_states(current_state_vec::NTuple{K,Int}, control_vec::NTuple{K,Int}, 
+                                    p_a::Float64, A::Matrix{Int}, 
+                                    num_samples::Int)::Vector{NTuple{K,Int}} where K
+    """
+    Sample multiple next state vectors efficiently for Monte Carlo simulation
+    
+    Args:
+    - current_state_vec: Current state vector
+    - control_vec: Control vector
+    - p_a: Attack probability parameter
+    - A: Adjacency matrix
+    - num_samples: Number of samples to generate
+    
+    Returns:
+    - Vector of next state vectors
+    """
+    next_states = Vector{NTuple{K,Int}}(undef, num_samples)
+    
+    @inbounds for i in 1:num_samples
+        next_states[i] = sample_next_state_vector(current_state_vec, control_vec, p_a, A)
+    end
+    
+    return next_states
 end
