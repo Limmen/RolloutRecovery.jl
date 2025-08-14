@@ -9,6 +9,7 @@ eta = 0.25
 p_a = 0.1
 p_c = 0.5
 
+println("Creating POMDP")
 X, x_to_vec, vec_to_x = RecoveryPOMDP.generate_state_space(K)
 U, u_to_vec, vec_to_u, U_local = RecoveryPOMDP.generate_control_space(K)
 x0 = RecoveryPOMDP.initial_state(K, vec_to_x)
@@ -32,7 +33,7 @@ println("Running rollout simulation with T=$T time steps, eval_samples=$eval_sam
 println("Parameters: alpha=$alpha, lookahead_horizon=$lookahead_horizon, rollout_horizon=$rollout_horizon, num_simulations=$num_simulations")
 
 start_time = time()
-average_cost = MonteCarloRolloutMultiagent.run_rollout_simulation(b0, U, X, K, n, x_to_vec, u_to_vec, vec_to_x, vec_to_u, A, p_a, C, 
+average_cost = MonteCarloRolloutMultiagentAsync.run_rollout_simulation(b0, U, X, K, n, x_to_vec, u_to_vec, vec_to_x, vec_to_u, A, p_a, C, 
                                                       alpha, lookahead_horizon, rollout_horizon, 
                                                       num_simulations, num_lookahead_samples, num_particles, T, eval_samples, threshold)
 end_time = time()
