@@ -3,8 +3,8 @@ Pkg.activate(".")
 using RolloutRecovery
 using Statistics
 
-K = 1
-n = 20
+K = 2
+n = 10
 eta = 0.25
 p_a = 0.1
 p_c = 0.1
@@ -19,13 +19,13 @@ A = RecoveryPOMDP.generate_erdos_renyi_graph(K, p_c)
 println("Num states: $(size(X, 1)), num controls: $(size(U, 1))")
 
 alpha = 0.95
-lookahead_horizon = 1
-rollout_horizon = 10
-num_simulations = 5
+lookahead_horizon = 0
+rollout_horizon = 5
+num_simulations = 10
 T = 100
 num_lookahead_samples = 10
 num_particles = 50
-eval_samples = 50
+eval_samples = 100
 threshold = 0.5
 
 println("Running rollout simulation with T=$T time steps, eval_samples=$eval_samples...")
@@ -39,5 +39,6 @@ end_time = time()
 execution_time = end_time - start_time
 
 println("Execution time: $(round(execution_time, digits=4)) seconds")
+println("Adjacency matrix A: $(A)")
 println("Average total discounted cost: $(round(average_cost, digits=4))")
 

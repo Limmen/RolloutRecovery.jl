@@ -67,7 +67,12 @@ function compute_q_value(particles::Matrix{Int}, weights::Vector{Float64}, u::In
         if rollout_horizon > 0
             rollout_cost = 0.0
             for sim in 1:num_simulations
-                sim_cost = simulate_rollout(particles, weights, C, X, K, x_to_vec, u_to_vec, vec_to_x, vec_to_u, A, p_a, alpha, rollout_horizon, threshold, intrusion_dist, no_intrusion_dist)
+                # Sample observation after applying control u
+                o_sample = BootstrapParticleFilter.sample_observation_from_particles(particles, weights, u, K, X, x_to_vec, u_to_vec, vec_to_x, A, p_a, intrusion_dist, no_intrusion_dist)
+                # Update particles and weights after applying control u and observing o_sample
+                new_particles, new_weights = BootstrapParticleFilter.particle_filter_update(particles, weights, u, o_sample, K, X, x_to_vec, u_to_vec, vec_to_x, A, p_a, intrusion_dist, no_intrusion_dist)
+                # Run rollout simulation from the updated particle set
+                sim_cost = simulate_rollout(new_particles, new_weights, C, X, K, x_to_vec, u_to_vec, vec_to_x, vec_to_u, A, p_a, alpha, rollout_horizon, threshold, intrusion_dist, no_intrusion_dist)
                 rollout_cost += sim_cost
             end
             rollout_cost /= num_simulations
@@ -138,8 +143,9 @@ function terminal_cost(particles::Matrix{Int}, weights::Vector{Float64},
     """
     Compute terminal cost using particle representation
     """
-    u_terminal = base_policy(particles, weights, K, x_to_vec, u_to_vec, vec_to_u, threshold)
-    return BootstrapParticleFilter.compute_particle_expected_cost(particles, weights, u_terminal, C, X)
+    return 0
+    #u_terminal = base_policy(particles, weights, K, x_to_vec, u_to_vec, vec_to_u, threshold)
+    #return BootstrapParticleFilter.compute_particle_expected_cost(particles, weights, u_terminal, C, X)
 end
 
 function base_policy(particles::Matrix{Int}, weights::Vector{Float64}, K::Int, 

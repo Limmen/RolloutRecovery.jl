@@ -63,7 +63,12 @@ function compute_q_value(b::Vector{Float64}, u::Int, U::Vector{Int}, X::Vector{I
         if rollout_horizon > 0
             rollout_cost = 0.0
             for sim in 1:num_simulations
-                sim_cost = simulate_rollout(b, P, Z, C, X, O, x_to_vec, u_to_vec, vec_to_u, U, alpha, rollout_horizon, threshold)
+                # Sample observation after applying control u
+                o_sample = POMDPUtil.sample_observation(b, u, O, X, P, Z)
+                # Compute next belief state after applying control u and observing o_sample
+                b_next = POMDPUtil.belief_operator(o_sample, u, b, X, Z, P)
+                # Run rollout simulation from the next belief state
+                sim_cost = simulate_rollout(b_next, P, Z, C, X, O, x_to_vec, u_to_vec, vec_to_u, U, alpha, rollout_horizon, threshold)
                 rollout_cost += sim_cost
             end
             rollout_cost /= num_simulations
