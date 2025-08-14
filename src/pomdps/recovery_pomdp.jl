@@ -167,7 +167,7 @@ function cost_function(x::Int, u::Int, x_to_vec::Dict{Int,NTuple{N,Int}},
     response_costs = 0.0
 
     @inbounds for i in 1:N
-        compromised_costs += 2 * x_vec[i] * (1 - u_vec[i])
+        compromised_costs += x_vec[i] * (1 - u_vec[i])
         response_costs += u_vec[i]
     end
 
@@ -329,8 +329,8 @@ function generate_component_observation_distributions(n::Int)::Tuple{Vector{Floa
     intrusion_dist = Vector{Float64}(undef, n + 1)
     no_intrusion_dist = Vector{Float64}(undef, n + 1)
 
-    intrusion_rv = BetaBinomial(n, 1, 0.7)
-    no_intrusion_rv = BetaBinomial(n, 0.7, 3)
+    intrusion_rv = BetaBinomial(n, 1.5, 1.2)
+    no_intrusion_rv = BetaBinomial(n, 1.2, 1.6)
 
     @inbounds for i in 0:n
         intrusion_dist[i+1] = pdf(intrusion_rv, i)

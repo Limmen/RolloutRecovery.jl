@@ -4,9 +4,9 @@ using RolloutRecovery
 using Statistics
 
 K = 1
-n = 10
-eta = 2.0
-p_a = 0.01
+n = 20
+eta = 0.25
+p_a = 0.1
 p_c = 0.1
 
 X, x_to_vec, vec_to_x = RecoveryPOMDP.generate_state_space(K)
@@ -22,11 +22,12 @@ Z = RecoveryPOMDP.generate_observation_tensor(n, X, K, x_to_vec, o_to_vec, O)
 println("Num states: $(size(X, 1)), num controls: $(size(U, 1)), num observations: $(size(O, 1))")
 
 alpha = 0.95
-lookahead_horizon = 1
-rollout_horizon = 5
+lookahead_horizon = 2
+rollout_horizon = 10
 num_simulations = 5
 T = 100
-eval_samples = 50
+eval_samples = 100
+threshold = 0.5
 
 println("Running rollout simulation with T=$T time steps, eval_samples=$eval_samples...")
 println("Parameters: alpha=$alpha, lookahead_horizon=$lookahead_horizon, rollout_horizon=$rollout_horizon, num_simulations=$num_simulations")
@@ -34,7 +35,7 @@ println("Parameters: alpha=$alpha, lookahead_horizon=$lookahead_horizon, rollout
 start_time = time()
 average_cost = Rollout.run_rollout_simulation(b0, U, X, O, P, Z, C, x_to_vec, u_to_vec, vec_to_u,
                                             alpha, lookahead_horizon, rollout_horizon, 
-                                            num_simulations, T, eval_samples)
+                                            num_simulations, T, eval_samples, threshold)
 end_time = time()
 execution_time = end_time - start_time
 

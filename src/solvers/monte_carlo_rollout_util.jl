@@ -4,7 +4,7 @@ function rollout_policy(particles::Matrix{Int}, weights::Vector{Float64}, U::Vec
                           X::Vector{Int}, K::Int, n::Int, x_to_vec::Dict{Int,NTuple{D,Int}},
                           u_to_vec::Dict{Int,NTuple{D,Int}}, vec_to_x::Dict{NTuple{D,Int},Int},
                           vec_to_u::Dict{NTuple{D,Int},Int}, A::Matrix{Int}, p_a::Float64, C::Matrix{Float64}, alpha::Float64, 
-                          lookahead_horizon::Int, rollout_horizon::Int, num_simulations::Int, N::Int)::Int where D
+                          lookahead_horizon::Int, rollout_horizon::Int, num_simulations::Int, N::Int, threshold::Float64)::Int where D
     """
     Implements Monte Carlo rollout algorithm using component-wise observation sampling
     
@@ -40,7 +40,7 @@ function rollout_policy(particles::Matrix{Int}, weights::Vector{Float64}, U::Vec
     @inbounds for u in U
         q_value = compute_q_value(particles, weights, u, U, X, K, x_to_vec, u_to_vec, vec_to_x, vec_to_u,
                                     A, p_a, C, alpha, lookahead_horizon, rollout_horizon, 
-                                    num_simulations, N, intrusion_dist, no_intrusion_dist)
+                                    num_simulations, N, threshold, intrusion_dist, no_intrusion_dist)
         
         if q_value < best_value
             best_value = q_value
@@ -55,7 +55,7 @@ function compute_q_value(particles::Matrix{Int}, weights::Vector{Float64}, u::In
                            U::Vector{Int}, X::Vector{Int}, K::Int, x_to_vec::Dict{Int,NTuple{D,Int}},
                            u_to_vec::Dict{Int,NTuple{D,Int}}, vec_to_x::Dict{NTuple{D,Int},Int},
                            vec_to_u::Dict{NTuple{D,Int},Int}, A::Matrix{Int}, p_a::Float64, C::Matrix{Float64}, alpha::Float64, 
-                           lookahead_horizon::Int, rollout_horizon::Int, num_simulations::Int, N::Int,
+                           lookahead_horizon::Int, rollout_horizon::Int, num_simulations::Int, N::Int, threshold::Float64,
                            intrusion_dist::Vector{Float64}, no_intrusion_dist::Vector{Float64})::Float64 where D
     """
     Computes Q-value using Monte Carlo sampling with component-wise observation sampling
@@ -67,14 +67,14 @@ function compute_q_value(particles::Matrix{Int}, weights::Vector{Float64}, u::In
         if rollout_horizon > 0
             rollout_cost = 0.0
             for sim in 1:num_simulations
-                sim_cost = simulate_rollout(particles, weights, C, X, K, x_to_vec, u_to_vec, vec_to_x, vec_to_u, A, p_a, alpha, rollout_horizon, intrusion_dist, no_intrusion_dist)
+                sim_cost = simulate_rollout(particles, weights, C, X, K, x_to_vec, u_to_vec, vec_to_x, vec_to_u, A, p_a, alpha, rollout_horizon, threshold, intrusion_dist, no_intrusion_dist)
                 rollout_cost += sim_cost
             end
             rollout_cost /= num_simulations
             return immediate_cost + alpha * rollout_cost + 
-                   alpha^(rollout_horizon + 1) * terminal_cost(particles, weights, C, X, K, x_to_vec, u_to_vec, vec_to_u)
+                   alpha^(rollout_horizon + 1) * terminal_cost(particles, weights, C, X, K, x_to_vec, u_to_vec, vec_to_u, threshold)
         else
-            return immediate_cost + alpha * terminal_cost(particles, weights, C, X, K, x_to_vec, u_to_vec, vec_to_u)
+            return immediate_cost + alpha * terminal_cost(particles, weights, C, X, K, x_to_vec, u_to_vec, vec_to_u, threshold)
         end
     end
     
@@ -90,7 +90,7 @@ function compute_q_value(particles::Matrix{Int}, weights::Vector{Float64}, u::In
             @inbounds for u_next in U
                 q_next = compute_q_value(new_particles, new_weights, u_next, U, X, K, x_to_vec, u_to_vec, vec_to_x, vec_to_u,
                                           A, p_a, C, alpha, lookahead_horizon - 1, rollout_horizon, 
-                                          num_simulations, N, intrusion_dist, no_intrusion_dist)
+                                          num_simulations, N, threshold, intrusion_dist, no_intrusion_dist)
                 min_expected_cost = min(min_expected_cost, q_next)
             end
             
@@ -105,7 +105,7 @@ end
 function simulate_rollout(particles::Matrix{Int}, weights::Vector{Float64}, 
                             C::Matrix{Float64}, X::Vector{Int}, K::Int, x_to_vec::Dict{Int,NTuple{D,Int}},
                             u_to_vec::Dict{Int,NTuple{D,Int}}, vec_to_x::Dict{NTuple{D,Int},Int},
-                            vec_to_u::Dict{NTuple{D,Int},Int}, A::Matrix{Int}, p_a::Float64, alpha::Float64, horizon::Int, 
+                            vec_to_u::Dict{NTuple{D,Int},Int}, A::Matrix{Int}, p_a::Float64, alpha::Float64, horizon::Int, threshold::Float64,
                             intrusion_dist::Vector{Float64}, no_intrusion_dist::Vector{Float64})::Float64 where D
     """
     Monte Carlo rollout simulation using component-wise observation sampling
@@ -117,7 +117,7 @@ function simulate_rollout(particles::Matrix{Int}, weights::Vector{Float64},
     alpha_power = 1.0
     
     @inbounds for t in 1:horizon
-        u_t = base_policy(particles_copy, weights_copy, K, x_to_vec, u_to_vec, vec_to_u)
+        u_t = base_policy(particles_copy, weights_copy, K, x_to_vec, u_to_vec, vec_to_u, threshold)
         cost_t = BootstrapParticleFilter.compute_particle_expected_cost(particles_copy, weights_copy, u_t, C, X)
         total_cost += alpha_power * cost_t
         alpha_power *= alpha
@@ -134,20 +134,20 @@ end
 
 function terminal_cost(particles::Matrix{Int}, weights::Vector{Float64}, 
                          C::Matrix{Float64}, X::Vector{Int}, K::Int, x_to_vec::Dict{Int,NTuple{D,Int}},
-                         u_to_vec::Dict{Int,NTuple{D,Int}}, vec_to_u::Dict{NTuple{D,Int},Int})::Float64 where D
+                         u_to_vec::Dict{Int,NTuple{D,Int}}, vec_to_u::Dict{NTuple{D,Int},Int}, threshold::Float64)::Float64 where D
     """
     Compute terminal cost using particle representation
     """
-    u_terminal = base_policy(particles, weights, K, x_to_vec, u_to_vec, vec_to_u)
+    u_terminal = base_policy(particles, weights, K, x_to_vec, u_to_vec, vec_to_u, threshold)
     return BootstrapParticleFilter.compute_particle_expected_cost(particles, weights, u_terminal, C, X)
 end
 
 function base_policy(particles::Matrix{Int}, weights::Vector{Float64}, K::Int, 
                     x_to_vec::Dict{Int,NTuple{D,Int}}, u_to_vec::Dict{Int,NTuple{D,Int}}, 
-                    vec_to_u::Dict{NTuple{D,Int},Int})::Int where D
+                    vec_to_u::Dict{NTuple{D,Int},Int}, threshold::Float64)::Int where D
     """
     Threshold-based base policy that sets control u=1 for each component 
-    if its belief of being compromised is greater than 0.5
+    if its belief of being compromised is greater than the given threshold
     """
     M = size(particles, 2)
     
@@ -170,7 +170,7 @@ function base_policy(particles::Matrix{Int}, weights::Vector{Float64}, K::Int,
     # Create control vector based on threshold policy
     control_vec = Vector{Int}(undef, K)
     @inbounds for k in 1:K
-        control_vec[k] = component_beliefs[k] > 0.5 ? 1 : 0
+        control_vec[k] = component_beliefs[k] > threshold ? 1 : 0
     end
     
     # Convert control vector to control index
@@ -204,7 +204,7 @@ function run_rollout_simulation(b_initial::Vector{Float64}, U::Vector{Int}, X::V
                                   x_to_vec::Dict{Int,NTuple{D,Int}}, u_to_vec::Dict{Int,NTuple{D,Int}}, 
                                   vec_to_x::Dict{NTuple{D,Int},Int}, vec_to_u::Dict{NTuple{D,Int},Int}, A::Matrix{Int}, p_a::Float64, C::Matrix{Float64},
                                   alpha::Float64, lookahead_horizon::Int, rollout_horizon::Int,
-                                  num_simulations::Int, N::Int, M::Int, T::Int, eval_samples::Int)::Float64 where D
+                                  num_simulations::Int, N::Int, M::Int, T::Int, eval_samples::Int, threshold::Float64)::Float64 where D
     """
     Monte Carlo rollout simulation for T time steps using component-wise observation sampling
     
@@ -229,6 +229,7 @@ function run_rollout_simulation(b_initial::Vector{Float64}, U::Vector{Int}, X::V
     - M: Number of particles
     - T: Number of time steps to simulate
     - eval_samples: Number of evaluation samples to run
+    - threshold: Threshold for base policy decision making
     
     Returns:
     - Average total cost across all evaluation samples
@@ -246,7 +247,7 @@ function run_rollout_simulation(b_initial::Vector{Float64}, U::Vector{Int}, X::V
         
         @inbounds for t in 1:T
             u_t = rollout_policy(particles, weights, U, X, K, n, x_to_vec, u_to_vec, vec_to_x, vec_to_u, A, p_a, C,
-                                   alpha, lookahead_horizon, rollout_horizon, num_simulations, N)
+                                   alpha, lookahead_horizon, rollout_horizon, num_simulations, N, threshold)
             
             cost_t = C[true_state + 1, u_t + 1]
             total_cost += alpha_power * cost_t
@@ -265,7 +266,12 @@ function run_rollout_simulation(b_initial::Vector{Float64}, U::Vector{Int}, X::V
         end
         
         total_costs[sample] = total_cost
+                
+        if sample % 1 == 0 || sample == eval_samples
+            current_avg = sum(total_costs[1:sample]) / sample
+            println("Sample $sample/$eval_samples, Current average cost: $(round(current_avg, digits=4))")
+        end
     end
-    
+
     return sum(total_costs) / eval_samples
 end

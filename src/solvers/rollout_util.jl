@@ -7,7 +7,7 @@ function rollout_policy(b::Vector{Float64}, U::Vector{Int}, X::Vector{Int}, O::V
     x_to_vec::Dict{Int,NTuple{K,Int}}, u_to_vec::Dict{Int,NTuple{K,Int}}, 
     vec_to_u::Dict{NTuple{K,Int},Int},
     alpha::Float64, lookahead_horizon::Int, rollout_horizon::Int,
-    num_simulations::Int)::Int where K
+    num_simulations::Int, threshold::Float64)::Int where K
     """
     Implements the basic rollout algorithm
 
@@ -36,7 +36,7 @@ function rollout_policy(b::Vector{Float64}, U::Vector{Int}, X::Vector{Int}, O::V
 
     @inbounds for u in U
         q_value = compute_q_value(b, u, U, X, O, P, Z, C, x_to_vec, u_to_vec, vec_to_u,
-            alpha, lookahead_horizon, rollout_horizon, num_simulations)
+            alpha, lookahead_horizon, rollout_horizon, num_simulations, threshold)
 
         if q_value < best_value
             best_value = q_value
@@ -52,7 +52,7 @@ function compute_q_value(b::Vector{Float64}, u::Int, U::Vector{Int}, X::Vector{I
     x_to_vec::Dict{Int,NTuple{K,Int}}, u_to_vec::Dict{Int,NTuple{K,Int}}, 
     vec_to_u::Dict{NTuple{K,Int},Int},
     alpha::Float64, lookahead_horizon::Int, rollout_horizon::Int,
-    num_simulations::Int)::Float64 where K
+    num_simulations::Int, threshold::Float64)::Float64 where K
     """
     Computes Q-value for control u in belief state b using lookahead optimization
     """
@@ -63,13 +63,13 @@ function compute_q_value(b::Vector{Float64}, u::Int, U::Vector{Int}, X::Vector{I
         if rollout_horizon > 0
             rollout_cost = 0.0
             for sim in 1:num_simulations
-                sim_cost = simulate_rollout(b, P, Z, C, X, O, x_to_vec, u_to_vec, vec_to_u, U, alpha, rollout_horizon)
+                sim_cost = simulate_rollout(b, P, Z, C, X, O, x_to_vec, u_to_vec, vec_to_u, U, alpha, rollout_horizon, threshold)
                 rollout_cost += sim_cost
             end
             rollout_cost /= num_simulations
-            return immediate_cost + alpha * rollout_cost + alpha^(rollout_horizon + 1) * terminal_cost(b, C, X, x_to_vec, u_to_vec, vec_to_u, U)
+            return immediate_cost + alpha * rollout_cost + alpha^(rollout_horizon + 1) * terminal_cost(b, C, X, x_to_vec, u_to_vec, vec_to_u, U, threshold)
         else
-            return immediate_cost + alpha * terminal_cost(b, C, X, x_to_vec, u_to_vec, vec_to_u, U)
+            return immediate_cost + alpha * terminal_cost(b, C, X, x_to_vec, u_to_vec, vec_to_u, U, threshold)
         end
     end
 
@@ -84,7 +84,7 @@ function compute_q_value(b::Vector{Float64}, u::Int, U::Vector{Int}, X::Vector{I
             min_expected_cost = Inf
             @inbounds for u_next in U
                 q_next = compute_q_value(b_next, u_next, U, X, O, P, Z, C, x_to_vec, u_to_vec, vec_to_u,
-                                       alpha, lookahead_horizon - 1, rollout_horizon, num_simulations)
+                                       alpha, lookahead_horizon - 1, rollout_horizon, num_simulations, threshold)
                 min_expected_cost = min(min_expected_cost, q_next)
             end
 
@@ -99,7 +99,7 @@ function simulate_rollout(b::Vector{Float64}, P::Array{Float64,3}, Z::Matrix{Flo
                          C::Matrix{Float64}, X::Vector{Int}, O::Vector{Int},
                          x_to_vec::Dict{Int,NTuple{K,Int}}, u_to_vec::Dict{Int,NTuple{K,Int}}, 
                          vec_to_u::Dict{NTuple{K,Int},Int}, U::Vector{Int},
-                         alpha::Float64, horizon::Int)::Float64 where K
+                         alpha::Float64, horizon::Int, threshold::Float64)::Float64 where K
     """
     Simulates rollout following base policy for specified horizon
     """
@@ -109,7 +109,7 @@ function simulate_rollout(b::Vector{Float64}, P::Array{Float64,3}, Z::Matrix{Flo
     alpha_power = 1.0
     
     @inbounds for t in 1:horizon
-        u_t = base_policy(current_belief, X, U, x_to_vec, u_to_vec, vec_to_u)
+        u_t = base_policy(current_belief, X, U, x_to_vec, u_to_vec, vec_to_u, threshold)
         cost_t = POMDPUtil.expected_cost(current_belief, u_t, C, X)
         total_cost += alpha_power * cost_t
         alpha_power *= alpha
@@ -125,20 +125,20 @@ end
 
 function terminal_cost(b::Vector{Float64}, C::Matrix{Float64}, X::Vector{Int},
                       x_to_vec::Dict{Int,NTuple{K,Int}}, u_to_vec::Dict{Int,NTuple{K,Int}}, 
-                      vec_to_u::Dict{NTuple{K,Int},Int}, U::Vector{Int})::Float64 where K
+                      vec_to_u::Dict{NTuple{K,Int},Int}, U::Vector{Int}, threshold::Float64)::Float64 where K
     """
     Computes terminal cost as expected cost at the belief state using base policy
     """
-    u_terminal = base_policy(b, X, U, x_to_vec, u_to_vec, vec_to_u)
+    u_terminal = base_policy(b, X, U, x_to_vec, u_to_vec, vec_to_u, threshold)
     return POMDPUtil.expected_cost(b, u_terminal, C, X)
 end
 
 function base_policy(b::Vector{Float64}, X::Vector{Int}, U::Vector{Int}, 
                     x_to_vec::Dict{Int,NTuple{K,Int}}, u_to_vec::Dict{Int,NTuple{K,Int}}, 
-                    vec_to_u::Dict{NTuple{K,Int},Int})::Int where K
+                    vec_to_u::Dict{NTuple{K,Int},Int}, threshold::Float64)::Int where K
     """
     Threshold-based base policy that sets control u=1 for each component 
-    if its belief of being compromised is greater than 0.5
+    if its belief of being compromised is greater than the given threshold
     """
     
     # Compute belief probabilities for each component being compromised
@@ -160,7 +160,7 @@ function base_policy(b::Vector{Float64}, X::Vector{Int}, U::Vector{Int},
     # Create control vector based on threshold policy
     control_vec = Vector{Int}(undef, K)
     @inbounds for k in 1:K
-        control_vec[k] = component_beliefs[k] > 0.5 ? 1 : 0
+        control_vec[k] = component_beliefs[k] > threshold ? 1 : 0
     end
     
     # Convert control vector to control index
@@ -195,7 +195,7 @@ function run_rollout_simulation(b_initial::Vector{Float64}, U::Vector{Int}, X::V
                                x_to_vec::Dict{Int,NTuple{K,Int}}, u_to_vec::Dict{Int,NTuple{K,Int}}, 
                                vec_to_u::Dict{NTuple{K,Int},Int},
                                alpha::Float64, lookahead_horizon::Int, rollout_horizon::Int,
-                               num_simulations::Int, T::Int, eval_samples::Int)::Float64 where K
+                               num_simulations::Int, T::Int, eval_samples::Int, threshold::Float64)::Float64 where K
     """
     Runs a simulation for T time steps using rollout policy
     
@@ -216,6 +216,7 @@ function run_rollout_simulation(b_initial::Vector{Float64}, U::Vector{Int}, X::V
     - num_simulations: Number of Monte Carlo simulations L
     - T: Number of time steps to simulate
     - eval_samples: Number of evaluation samples to run
+    - threshold: Threshold for base policy decision making
     
     Returns:
     - Average total cost across all evaluation samples
@@ -232,7 +233,7 @@ function run_rollout_simulation(b_initial::Vector{Float64}, U::Vector{Int}, X::V
         
         @inbounds for t in 1:T
             u_t = rollout_policy(current_belief, U, X, O, P, Z, C, x_to_vec, u_to_vec, vec_to_u,
-                                alpha, lookahead_horizon, rollout_horizon, num_simulations)
+                                alpha, lookahead_horizon, rollout_horizon, num_simulations, threshold)
             
             cost_t = C[true_state + 1, u_t + 1]
             total_cost += alpha_power * cost_t
@@ -246,7 +247,10 @@ function run_rollout_simulation(b_initial::Vector{Float64}, U::Vector{Int}, X::V
         end
         
         total_costs[sample] = total_cost
+                
+        current_avg = sum(total_costs[1:sample]) / sample
+        println("Sample $sample/$eval_samples, Current average cost: $(round(current_avg, digits=4))")
     end
-    
+
     return sum(total_costs) / eval_samples
 end
