@@ -1,10 +1,10 @@
-module MonteCarloRollout
+module MonteCarloRolloutMultiagent
 
 using Distributions
 using LinearAlgebra
 using Statistics
 
-include("monte_carlo_rollout.jl")
+include("monte_carlo_rollout_multiagent.jl")
 include("../utils/POMDPUtil.jl")
 include("../pomdps/RecoveryPOMDP.jl")
 include("../particle_filters/BootstrapParticleFilter.jl")

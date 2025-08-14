@@ -3,7 +3,7 @@ Pkg.activate(".")
 using RolloutRecovery
 using Statistics
 
-K = 2
+K = 3
 n = 10
 eta = 0.25
 p_a = 0.1
