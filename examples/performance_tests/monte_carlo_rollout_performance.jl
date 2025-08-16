@@ -3,36 +3,33 @@ Pkg.activate(".")
 using RolloutRecovery
 using Statistics
 
-K = 6
+K = 7
 n = 1000
-eta = 0.25
-p_a = 0.1
+eta = 0.2
+p_a = 0.05
 p_c = 0.5
 
-X, x_to_vec, vec_to_x = RecoveryPOMDP.generate_state_space(K)
-U, u_to_vec, vec_to_u, U_local = RecoveryPOMDP.generate_control_space(K)
-x0 = RecoveryPOMDP.initial_state(K, vec_to_x)
-b0 = RecoveryPOMDP.initial_belief(K, X, vec_to_x)
-C = RecoveryPOMDP.generate_cost_matrix(X, U, x_to_vec, u_to_vec, eta)
+initial_state_vec = NTuple{K,Int}(zeros(Int, K))
+
 A = RecoveryPOMDP.generate_erdos_renyi_graph(K, p_c)
 
-println("Num states: $(size(X, 1)), num controls: $(size(U, 1))")
+println("Num states: $(2^K), num controls: $(2^K)")
 
 alpha = 0.95
 lookahead_horizon = 1
-rollout_horizon = 0
-num_simulations = 0
-T = 100
+rollout_horizon = 5
+num_simulations = 10
+T = 1
 num_lookahead_samples = 10
 num_particles = 50
-eval_samples = 100
+eval_samples = 1
 threshold = 0.25
 
 println("Running rollout simulation with T=$T time steps, eval_samples=$eval_samples...")
 println("Parameters: alpha=$alpha, lookahead_horizon=$lookahead_horizon, rollout_horizon=$rollout_horizon, num_simulations=$num_simulations")
 
 start_time = time()
-average_cost = MonteCarloRollout.run_rollout_simulation(b0, U, X, K, n, x_to_vec, u_to_vec, vec_to_x, vec_to_u, A, p_a, C, 
+average_cost = MonteCarloRollout.run_rollout_simulation(initial_state_vec, K, n, A, p_a, eta, 
                                                       alpha, lookahead_horizon, rollout_horizon, 
                                                       num_simulations, num_lookahead_samples, num_particles, T, eval_samples, threshold)
 end_time = time()

@@ -4,8 +4,8 @@ using RolloutRecovery
 using Statistics
 
 K = 3
-n = 10
-eta = 0.25
+n = 200
+eta = 0.2
 p_a = 0.1
 p_c = 0.1
 
@@ -25,8 +25,8 @@ alpha = 0.95
 lookahead_horizon = 0
 rollout_horizon = 5
 num_simulations = 10
-T = 100
-eval_samples = 100
+T = 1
+eval_samples = 1
 threshold = 0.5
 
 println("Running rollout simulation with T=$T time steps, eval_samples=$eval_samples...")
@@ -40,6 +40,6 @@ end_time = time()
 execution_time = end_time - start_time
 
 println("Execution time: $(round(execution_time, digits=4)) seconds")
-println("Adjacency matrix A: $(A)")
+#println("Adjacency matrix A: $(A)")
 println("Average total discounted cost: $(round(average_cost, digits=4))")
 

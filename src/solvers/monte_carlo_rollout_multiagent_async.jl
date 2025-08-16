@@ -1,10 +1,7 @@
 const PROB_THRESHOLD = 1e-10
 
-function rollout_policy(particles::Matrix{Int}, weights::Vector{Float64}, U::Vector{Int}, 
-                          X::Vector{Int}, K::Int, n::Int, x_to_vec::Dict{Int,NTuple{D,Int}},
-                          u_to_vec::Dict{Int,NTuple{D,Int}}, vec_to_x::Dict{NTuple{D,Int},Int},
-                          vec_to_u::Dict{NTuple{D,Int},Int}, A::Matrix{Int}, p_a::Float64, C::Matrix{Float64}, alpha::Float64, 
-                          lookahead_horizon::Int, rollout_horizon::Int, num_simulations::Int, N::Int, threshold::Float64)::Int where D
+function rollout_policy(particles, weights, K, n, A, p_a, alpha, 
+                          lookahead_horizon, rollout_horizon, num_simulations, N, threshold, eta)
     """
     Implements Parallel Multiagent Monte Carlo rollout algorithm using component-wise optimization
     
@@ -19,31 +16,25 @@ function rollout_policy(particles::Matrix{Int}, weights::Vector{Float64}, U::Vec
     Args:
     - particles: Matrix where each column is a particle (state vector)
     - weights: Particle weights
-    - U: Control space
-    - X: State space  
     - K: Number of components
     - n: Maximum observation value per component
-    - x_to_vec: State index to vector mapping
-    - u_to_vec: Control index to vector mapping
-    - vec_to_x: Vector to state index mapping
-    - vec_to_u: Vector to control index mapping
     - A: Transition matrix
     - p_a: Transition probability
-    - C: Cost matrix
     - alpha: Discount factor
     - lookahead_horizon: Lookahead horizon
     - rollout_horizon: Rollout horizon
     - num_simulations: Number of Monte Carlo simulations
     - N: Number of sample observations for lookahead
     - threshold: Threshold for base policy
+    - eta: Cost parameter
     
     Returns:
-    - Rollout control u
+    - Rollout control vector
     """
     
     intrusion_dist, no_intrusion_dist = RecoveryPOMDP.generate_component_observation_distributions(n)
     
-    base_control_vec = get_base_policy_vector(particles, weights, K, x_to_vec, u_to_vec, vec_to_u, threshold)
+    base_control_vec = get_base_policy_vector(particles, weights, K, threshold)
     
     optimal_control_vec = Vector{Int}(undef, K)
     
@@ -55,12 +46,11 @@ function rollout_policy(particles::Matrix{Int}, weights::Vector{Float64}, U::Vec
             test_control_vec = copy(base_control_vec)
             test_control_vec[k] = u_k
             
-            control_tuple = NTuple{K,Int}(test_control_vec)
-            u = vec_to_u[control_tuple]
+            u_vec = NTuple{K,Int}(test_control_vec)
             
-            q_value = compute_q_value(particles, weights, u, k, base_control_vec, U, X, K, x_to_vec, u_to_vec, vec_to_x, vec_to_u,
-                                                A, p_a, C, alpha, lookahead_horizon, rollout_horizon, 
-                                                num_simulations, N, threshold, intrusion_dist, no_intrusion_dist)
+            q_value = compute_q_value(particles, weights, u_vec, k, base_control_vec, K,
+                                                A, p_a, alpha, lookahead_horizon, rollout_horizon, 
+                                                num_simulations, N, threshold, intrusion_dist, no_intrusion_dist, eta)
             
             if q_value < best_q_value
                 best_q_value = q_value
@@ -71,59 +61,56 @@ function rollout_policy(particles::Matrix{Int}, weights::Vector{Float64}, U::Vec
         optimal_control_vec[k] = best_component_value
     end
     
-    control_tuple = NTuple{K,Int}(optimal_control_vec)
-    return vec_to_u[control_tuple]
+    return NTuple{K,Int}(optimal_control_vec)
 end
 
-function compute_q_value(particles::Matrix{Int}, weights::Vector{Float64}, u::Int, 
-                                   component_k::Int, partial_control_vec::Vector{Int},
-                                   U::Vector{Int}, X::Vector{Int}, K::Int, x_to_vec::Dict{Int,NTuple{D,Int}},
-                                   u_to_vec::Dict{Int,NTuple{D,Int}}, vec_to_x::Dict{NTuple{D,Int},Int},
-                                   vec_to_u::Dict{NTuple{D,Int},Int}, A::Matrix{Int}, p_a::Float64, C::Matrix{Float64}, alpha::Float64, 
-                                   lookahead_horizon::Int, rollout_horizon::Int, num_simulations::Int, N::Int, threshold::Float64,
-                                   intrusion_dist::Vector{Float64}, no_intrusion_dist::Vector{Float64})::Float64 where D
+function compute_q_value(particles, weights, u_vec, 
+                                   component_k, partial_control_vec,
+                                   K, A, p_a, alpha, 
+                                   lookahead_horizon, rollout_horizon, num_simulations, N, threshold,
+                                   intrusion_dist, no_intrusion_dist, eta)
     """
     Computes Q-value for multiagent rollout where we're optimizing component k
     and assuming remaining components follow base policy
     """
     
-    immediate_cost = BootstrapParticleFilter.compute_particle_expected_cost(particles, weights, u, C, X)
+    immediate_cost = compute_particle_expected_cost(particles, weights, u_vec, eta, K)
     
     if lookahead_horizon == 0
         if rollout_horizon > 0
             rollout_cost = 0.0
             for sim in 1:num_simulations
-                o_sample = BootstrapParticleFilter.sample_observation_from_particles(particles, weights, u, K, X, x_to_vec, u_to_vec, vec_to_x, A, p_a, intrusion_dist, no_intrusion_dist)
-                new_particles, new_weights = BootstrapParticleFilter.particle_filter_update(particles, weights, u, o_sample, K, X, x_to_vec, u_to_vec, vec_to_x, A, p_a, intrusion_dist, no_intrusion_dist)
-                sim_cost = simulate_rollout(new_particles, new_weights, component_k, partial_control_vec, C, X, K, x_to_vec, u_to_vec, vec_to_x, vec_to_u, A, p_a, alpha, rollout_horizon, threshold, intrusion_dist, no_intrusion_dist)
+                o_sample = BootstrapParticleFilter.sample_observation_from_particles(particles, weights, u_vec, K, A, p_a, intrusion_dist, no_intrusion_dist)
+                new_particles, new_weights = BootstrapParticleFilter.particle_filter_update(particles, weights, u_vec, o_sample, K, A, p_a, intrusion_dist, no_intrusion_dist)
+                sim_cost = simulate_rollout(new_particles, new_weights, component_k, partial_control_vec, K, A, p_a, alpha, rollout_horizon, threshold, intrusion_dist, no_intrusion_dist, eta)
                 rollout_cost += sim_cost
             end
             rollout_cost /= num_simulations
             return immediate_cost + alpha * rollout_cost + 
-                   alpha^(rollout_horizon + 1) * terminal_cost(particles, weights, component_k, partial_control_vec, C, X, K, x_to_vec, u_to_vec, vec_to_u, threshold)
+                   alpha^(rollout_horizon + 1) * terminal_cost(particles, weights, component_k, partial_control_vec, K, threshold, eta)
         else
-            return immediate_cost + alpha * terminal_cost(particles, weights, component_k, partial_control_vec, C, X, K, x_to_vec, u_to_vec, vec_to_u, threshold)
+            return immediate_cost + alpha * terminal_cost(particles, weights, component_k, partial_control_vec, K, threshold, eta)
         end
     end
     
     future_cost = 0.0
     
-    sampled_observations = BootstrapParticleFilter.sample_observations_from_particles(particles, weights, u, K, N, X, x_to_vec, u_to_vec, vec_to_x, A, p_a, intrusion_dist, no_intrusion_dist)
+    sampled_observations = BootstrapParticleFilter.sample_observations_from_particles(particles, weights, u_vec, K, N, A, p_a, intrusion_dist, no_intrusion_dist)
     
     @inbounds for o_vec in sampled_observations
-        new_particles, new_weights = BootstrapParticleFilter.particle_filter_update(particles, weights, u, o_vec, K, X, x_to_vec, u_to_vec, vec_to_x, A, p_a, intrusion_dist, no_intrusion_dist)
+        new_particles, new_weights = BootstrapParticleFilter.particle_filter_update(particles, weights, u_vec, o_vec, K, A, p_a, intrusion_dist, no_intrusion_dist)
         
         if sum(new_weights) > PROB_THRESHOLD
-            u_future = rollout_policy_multiagent_internal(new_particles, new_weights, U, X, K, x_to_vec, u_to_vec, vec_to_x, vec_to_u, A, p_a, C, 
+            u_future = rollout_policy_multiagent_internal(new_particles, new_weights, K, A, p_a, 
                                              alpha, lookahead_horizon - 1, rollout_horizon, num_simulations, N, threshold, 
-                                             intrusion_dist, no_intrusion_dist)
+                                             intrusion_dist, no_intrusion_dist, eta)
             
-            q_future = compute_q_value(new_particles, new_weights, u_future, 1, Vector{Int}(), U, X, K, 
-                                     x_to_vec, u_to_vec, vec_to_x, vec_to_u, A, p_a, C, alpha, 
+            q_future = compute_q_value(new_particles, new_weights, u_future, 1, Vector{Int}(), K, 
+                                     A, p_a, alpha, 
                                      lookahead_horizon - 1, rollout_horizon, num_simulations, N, threshold, 
-                                     intrusion_dist, no_intrusion_dist)
+                                     intrusion_dist, no_intrusion_dist, eta)
             
-            obs_prob = compute_observation_probability(o_vec, new_particles, new_weights, K, x_to_vec, intrusion_dist, no_intrusion_dist)
+            obs_prob = compute_observation_probability(o_vec, new_particles, new_weights, K, intrusion_dist, no_intrusion_dist)
             future_cost += obs_prob * alpha * q_future
         end
     end
@@ -131,18 +118,15 @@ function compute_q_value(particles::Matrix{Int}, weights::Vector{Float64}, u::In
     return immediate_cost + future_cost
 end
 
-function rollout_policy_multiagent_internal(particles::Matrix{Int}, weights::Vector{Float64}, U::Vector{Int}, 
-                                X::Vector{Int}, K::Int, x_to_vec::Dict{Int,NTuple{D,Int}},
-                                u_to_vec::Dict{Int,NTuple{D,Int}}, vec_to_x::Dict{NTuple{D,Int},Int},
-                                vec_to_u::Dict{NTuple{D,Int},Int}, A::Matrix{Int}, p_a::Float64, C::Matrix{Float64}, 
-                                alpha::Float64, lookahead_horizon::Int, rollout_horizon::Int, num_simulations::Int, 
-                                N::Int, threshold::Float64, intrusion_dist::Vector{Float64}, 
-                                no_intrusion_dist::Vector{Float64})::Int where D
+function rollout_policy_multiagent_internal(particles, weights, K, A, p_a, 
+                                alpha, lookahead_horizon, rollout_horizon, num_simulations, 
+                                N, threshold, intrusion_dist, 
+                                no_intrusion_dist, eta)
     """
     Internal multiagent rollout that reuses observation distributions for efficiency
     Uses parallel component optimization where each component assumes others follow base policy
     """
-    base_control_vec = get_base_policy_vector(particles, weights, K, x_to_vec, u_to_vec, vec_to_u, threshold)
+    base_control_vec = get_base_policy_vector(particles, weights, K, threshold)
     
     optimal_control_vec = Vector{Int}(undef, K)
     
@@ -154,12 +138,11 @@ function rollout_policy_multiagent_internal(particles::Matrix{Int}, weights::Vec
             test_control_vec = copy(base_control_vec)
             test_control_vec[k] = u_k
             
-            control_tuple = NTuple{K,Int}(test_control_vec)
-            u = vec_to_u[control_tuple]
+            u_vec = NTuple{K,Int}(test_control_vec)
             
-            q_value = compute_q_value(particles, weights, u, k, base_control_vec, U, X, K, x_to_vec, u_to_vec, vec_to_x, vec_to_u,
-                                                A, p_a, C, alpha, lookahead_horizon, rollout_horizon, 
-                                                num_simulations, N, threshold, intrusion_dist, no_intrusion_dist)
+            q_value = compute_q_value(particles, weights, u_vec, k, base_control_vec, K,
+                                                A, p_a, alpha, lookahead_horizon, rollout_horizon, 
+                                                num_simulations, N, threshold, intrusion_dist, no_intrusion_dist, eta)
             
             if q_value < best_q_value
                 best_q_value = q_value
@@ -170,17 +153,13 @@ function rollout_policy_multiagent_internal(particles::Matrix{Int}, weights::Vec
         optimal_control_vec[k] = best_component_value
     end
     
-    control_tuple = NTuple{K,Int}(optimal_control_vec)
-    return vec_to_u[control_tuple]
+    return NTuple{K,Int}(optimal_control_vec)
 end
 
-function simulate_rollout(particles::Matrix{Int}, weights::Vector{Float64}, component_k::Int, 
-                                   partial_control_vec::Vector{Int}, C::Matrix{Float64}, X::Vector{Int}, K::Int, 
-                                   x_to_vec::Dict{Int,NTuple{D,Int}}, u_to_vec::Dict{Int,NTuple{D,Int}}, 
-                                   vec_to_x::Dict{NTuple{D,Int},Int}, vec_to_u::Dict{NTuple{D,Int},Int},
-                                   A::Matrix{Int}, p_a::Float64, alpha::Float64, rollout_horizon::Int, 
-                                   threshold::Float64, intrusion_dist::Vector{Float64}, 
-                                   no_intrusion_dist::Vector{Float64})::Float64 where D
+function simulate_rollout(particles, weights, component_k, 
+                                   partial_control_vec, K, A, p_a, alpha, rollout_horizon, 
+                                   threshold, intrusion_dist, 
+                                   no_intrusion_dist, eta)
     """
     Simulates a rollout using the multiagent base policy (threshold policy)
     """
@@ -189,14 +168,13 @@ function simulate_rollout(particles::Matrix{Int}, weights::Vector{Float64}, comp
     current_weights = copy(weights)
     
     for h in 1:rollout_horizon
-        u_rollout = base_policy(current_particles, current_weights, K, x_to_vec, 
-                                                     u_to_vec, vec_to_u, threshold)
+        u_rollout = base_policy(current_particles, current_weights, K, threshold)
         
-        immediate_cost = BootstrapParticleFilter.compute_particle_expected_cost(current_particles, current_weights, u_rollout, C, X)
+        immediate_cost = compute_particle_expected_cost(current_particles, current_weights, u_rollout, eta, K)
         total_cost += alpha^(h-1) * immediate_cost
         
-        o_sample = BootstrapParticleFilter.sample_observation_from_particles(current_particles, current_weights, u_rollout, K, X, x_to_vec, u_to_vec, vec_to_x, A, p_a, intrusion_dist, no_intrusion_dist)
-        current_particles, current_weights = BootstrapParticleFilter.particle_filter_update(current_particles, current_weights, u_rollout, o_sample, K, X, x_to_vec, u_to_vec, vec_to_x, A, p_a, intrusion_dist, no_intrusion_dist)
+        o_sample = BootstrapParticleFilter.sample_observation_from_particles(current_particles, current_weights, u_rollout, K, A, p_a, intrusion_dist, no_intrusion_dist)
+        current_particles, current_weights = BootstrapParticleFilter.particle_filter_update(current_particles, current_weights, u_rollout, o_sample, K, A, p_a, intrusion_dist, no_intrusion_dist)
         
         if sum(current_weights) <= PROB_THRESHOLD
             break
@@ -206,20 +184,17 @@ function simulate_rollout(particles::Matrix{Int}, weights::Vector{Float64}, comp
     return total_cost
 end
 
-function terminal_cost(particles::Matrix{Int}, weights::Vector{Float64}, component_k::Int, 
-                                partial_control_vec::Vector{Int}, C::Matrix{Float64}, X::Vector{Int}, K::Int, 
-                                x_to_vec::Dict{Int,NTuple{D,Int}}, u_to_vec::Dict{Int,NTuple{D,Int}}, 
-                                vec_to_u::Dict{NTuple{D,Int},Int}, threshold::Float64)::Float64 where D
+function terminal_cost(particles, weights, component_k, 
+                                partial_control_vec, K, 
+                                threshold, eta)
     """
     Computes terminal cost using multiagent base policy (threshold policy)
     """
-    u_terminal = base_policy(particles, weights, K, x_to_vec, u_to_vec, vec_to_u, threshold)
-    return BootstrapParticleFilter.compute_particle_expected_cost(particles, weights, u_terminal, C, X)
+    u_terminal = base_policy(particles, weights, K, threshold)
+    return compute_particle_expected_cost(particles, weights, u_terminal, eta, K)
 end
 
-function base_policy(particles::Matrix{Int}, weights::Vector{Float64}, K::Int, 
-                    x_to_vec::Dict{Int,NTuple{D,Int}}, u_to_vec::Dict{Int,NTuple{D,Int}}, 
-                    vec_to_u::Dict{NTuple{D,Int},Int}, threshold::Float64)::Int where D
+function base_policy(particles, weights, K, threshold)
     """
     Threshold-based base policy that sets control u=1 for each component 
     if its belief of being compromised is greater than the given threshold
@@ -229,8 +204,7 @@ function base_policy(particles::Matrix{Int}, weights::Vector{Float64}, K::Int,
     component_beliefs = zeros(K)
     
     @inbounds for i in 1:M
-        state = particles[1, i]
-        state_vec = x_to_vec[state]
+        state_vec = NTuple{K,Int}(particles[:, i])
         weight = weights[i]
         
         for k in 1:K
@@ -245,15 +219,13 @@ function base_policy(particles::Matrix{Int}, weights::Vector{Float64}, K::Int,
         control_vec[k] = component_beliefs[k] > threshold ? 1 : 0
     end
     
-    control_tuple = NTuple{K,Int}(control_vec)
-    return vec_to_u[control_tuple]
+    return NTuple{K,Int}(control_vec)
 end
 
-function compute_observation_probability(o_vec::NTuple{D,Int}, particles::Matrix{Int}, 
-                                        weights::Vector{Float64}, K::Int,
-                                        x_to_vec::Dict{Int,NTuple{D,Int}},
-                                        intrusion_dist::Vector{Float64}, 
-                                        no_intrusion_dist::Vector{Float64})::Float64 where D
+function compute_observation_probability(o_vec, particles, 
+                                        weights, K,
+                                        intrusion_dist, 
+                                        no_intrusion_dist)
     """
     Compute the probability of an observation vector using the factorized structure
     """
@@ -261,8 +233,7 @@ function compute_observation_probability(o_vec::NTuple{D,Int}, particles::Matrix
     total_prob = 0.0
     
     @inbounds for i in 1:M
-        state = particles[1, i]
-        state_vec = x_to_vec[state]
+        state_vec = NTuple{K,Int}(particles[:, i])
         
         obs_likelihood = RecoveryPOMDP.compute_observation_likelihood(o_vec, state_vec, intrusion_dist, no_intrusion_dist)
         total_prob += weights[i] * obs_likelihood
@@ -271,27 +242,19 @@ function compute_observation_probability(o_vec::NTuple{D,Int}, particles::Matrix
     return total_prob
 end
 
-function run_rollout_simulation(b_initial::Vector{Float64}, U::Vector{Int}, X::Vector{Int}, K::Int, n::Int,
-                                  x_to_vec::Dict{Int,NTuple{D,Int}}, u_to_vec::Dict{Int,NTuple{D,Int}}, 
-                                  vec_to_x::Dict{NTuple{D,Int},Int}, vec_to_u::Dict{NTuple{D,Int},Int}, A::Matrix{Int}, p_a::Float64, C::Matrix{Float64},
-                                  alpha::Float64, lookahead_horizon::Int, rollout_horizon::Int,
-                                  num_simulations::Int, N::Int, M::Int, T::Int, eval_samples::Int, threshold::Float64)::Float64 where D
+function run_rollout_simulation(initial_state_vec, K, n,
+                                  A, p_a,
+                                  alpha, lookahead_horizon, rollout_horizon,
+                                  num_simulations, N, M, T, eval_samples, threshold, eta)
     """
     Monte Carlo rollout simulation for T time steps using component-wise observation sampling
     
     Args:
-    - b_initial: Initial belief state
-    - U: Control space
-    - X: State space  
+    - initial_state_vec: Initial state vector (deterministic)
     - K: Number of components
     - n: Maximum observation value per component
-    - x_to_vec: State index to vector mapping
-    - u_to_vec: Control index to vector mapping
-    - vec_to_x: Vector to state index mapping
-    - vec_to_u: Vector to control index mapping
     - A: Transition matrix
     - p_a: Transition probability
-    - C: Cost matrix
     - alpha: Discount factor
     - lookahead_horizon: Lookahead horizon
     - rollout_horizon: Rollout horizon
@@ -301,6 +264,7 @@ function run_rollout_simulation(b_initial::Vector{Float64}, U::Vector{Int}, X::V
     - T: Number of time steps to simulate
     - eval_samples: Number of evaluation samples to run
     - threshold: Threshold for base policy decision making
+    - eta: Cost parameter
     
     Returns:
     - Average total cost across all evaluation samples
@@ -310,29 +274,33 @@ function run_rollout_simulation(b_initial::Vector{Float64}, U::Vector{Int}, X::V
     total_costs = Vector{Float64}(undef, eval_samples)
     
     @inbounds for sample in 1:eval_samples
-        particles, weights = BootstrapParticleFilter.belief_to_particles(b_initial, X, M)
-        true_state = X[rand(Categorical(b_initial))]
+        # Create particles from deterministic initial state
+        particles = Matrix{Int}(undef, K, M)
+        @inbounds for i in 1:M
+            particles[:, i] = collect(initial_state_vec)
+        end
+        weights = fill(1.0 / M, M)
+        
+        true_state_vec = collect(initial_state_vec)
         
         total_cost = 0.0
         alpha_power = 1.0
         
         @inbounds for t in 1:T
-            u_t = rollout_policy(particles, weights, U, X, K, n, x_to_vec, u_to_vec, vec_to_x, vec_to_u, A, p_a, C,
-                                   alpha, lookahead_horizon, rollout_horizon, num_simulations, N, threshold)
+            u_t_vec = rollout_policy(particles, weights, K, n, A, p_a,
+                                   alpha, lookahead_horizon, rollout_horizon, num_simulations, N, threshold, eta)
             
-            cost_t = C[true_state + 1, u_t + 1]
+            cost_t = RecoveryPOMDP.compute_cost(Tuple(true_state_vec), u_t_vec, eta)
             total_cost += alpha_power * cost_t
             alpha_power *= alpha
             
             if t < T
-                true_state_vec = x_to_vec[true_state]
-                o_t = RecoveryPOMDP.sample_observation_vector(true_state_vec, intrusion_dist, no_intrusion_dist)
+                o_t = RecoveryPOMDP.sample_observation_vector(Tuple(true_state_vec), intrusion_dist, no_intrusion_dist)
                 
-                true_state = RecoveryPOMDP.sample_next_state_from_transition_probs(true_state, u_t, p_a, 
-                                                                                  x_to_vec, u_to_vec, vec_to_x, A)
+                true_state_vec = RecoveryPOMDP.sample_next_state_vector(Tuple(true_state_vec), u_t_vec, p_a, A)
                 
                 particles, weights = BootstrapParticleFilter.particle_filter_update(particles, weights, 
-                                                                           u_t, o_t, K, X, x_to_vec, u_to_vec, vec_to_x, A, p_a, intrusion_dist, no_intrusion_dist)
+                                                                           u_t_vec, o_t, K, A, p_a, intrusion_dist, no_intrusion_dist)
             end
         end
         
@@ -347,9 +315,7 @@ function run_rollout_simulation(b_initial::Vector{Float64}, U::Vector{Int}, X::V
     return sum(total_costs) / eval_samples
 end
 
-function get_base_policy_vector(particles::Matrix{Int}, weights::Vector{Float64}, K::Int,
-                               x_to_vec::Dict{Int,NTuple{D,Int}}, u_to_vec::Dict{Int,NTuple{D,Int}}, 
-                               vec_to_u::Dict{NTuple{D,Int},Int}, threshold::Float64)::Vector{Int} where D
+function get_base_policy_vector(particles, weights, K, threshold)
     """
     Get the base policy control vector (threshold policy)
     """
@@ -358,8 +324,7 @@ function get_base_policy_vector(particles::Matrix{Int}, weights::Vector{Float64}
     component_beliefs = zeros(K)
     
     @inbounds for i in 1:M
-        state = particles[1, i]
-        state_vec = x_to_vec[state]
+        state_vec = NTuple{K,Int}(particles[:, i])
         weight = weights[i]
         
         for k in 1:K
@@ -375,4 +340,21 @@ function get_base_policy_vector(particles::Matrix{Int}, weights::Vector{Float64}
     end
     
     return control_vec
+end
+
+function compute_particle_expected_cost(particles, weights, u_vec, eta, K)
+    """
+    Compute expected cost using particle representation with direct cost computation
+    """
+    
+    M = size(particles, 2)
+    expected_cost = 0.0
+    
+    @inbounds for i in 1:M
+        state_vec = Tuple(particles[:, i])
+        cost = RecoveryPOMDP.compute_cost(state_vec, u_vec, eta)
+        expected_cost += weights[i] * cost
+    end
+    
+    return expected_cost
 end

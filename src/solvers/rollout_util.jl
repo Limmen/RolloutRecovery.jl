@@ -34,7 +34,8 @@ function rollout_policy(b::Vector{Float64}, U::Vector{Int}, X::Vector{Int}, O::V
     best_control = U[1]
     best_value = Inf
 
-    @inbounds for u in U
+    @inbounds for (i, u) in enumerate(U)
+        println("Evaluating control $i/$(length(U))...")
         q_value = compute_q_value(b, u, U, X, O, P, Z, C, x_to_vec, u_to_vec, vec_to_u,
             alpha, lookahead_horizon, rollout_horizon, num_simulations, threshold)
 
@@ -62,7 +63,7 @@ function compute_q_value(b::Vector{Float64}, u::Int, U::Vector{Int}, X::Vector{I
     if lookahead_horizon == 0
         if rollout_horizon > 0
             rollout_cost = 0.0
-            for sim in 1:num_simulations
+            for sim in 1:num_simulations                
                 # Sample observation after applying control u
                 o_sample = POMDPUtil.sample_observation(b, u, O, X, P, Z)
                 # Compute next belief state after applying control u and observing o_sample
@@ -236,7 +237,7 @@ function run_rollout_simulation(b_initial::Vector{Float64}, U::Vector{Int}, X::V
         total_cost = 0.0
         alpha_power = 1.0
         
-        @inbounds for t in 1:T
+        @inbounds for t in 1:T            
             u_t = rollout_policy(current_belief, U, X, O, P, Z, C, x_to_vec, u_to_vec, vec_to_u,
                                 alpha, lookahead_horizon, rollout_horizon, num_simulations, threshold)
             

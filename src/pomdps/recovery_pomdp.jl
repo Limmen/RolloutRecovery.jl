@@ -174,6 +174,29 @@ function cost_function(x::Int, u::Int, x_to_vec::Dict{Int,NTuple{N,Int}},
     return eta * compromised_costs + response_costs
 end
 
+function compute_cost(x_vec::NTuple{K,Int}, u_vec::NTuple{K,Int}, eta::Float64)::Float64 where K
+    """
+    Compute the cost c(x,u) combining compromise and response costs using state and control vectors directly
+
+    Args:
+    - x_vec: State vector (K-tuple of 0s and 1s)
+    - u_vec: Control vector (K-tuple of 0s and 1s)
+    - eta: Weight parameter for compromised costs
+
+    Returns:
+    - Total weighted cost
+    """
+    compromised_costs = 0.0
+    response_costs = 0.0
+
+    @inbounds for i in 1:K
+        compromised_costs += x_vec[i] * (1 - u_vec[i])
+        response_costs += u_vec[i]
+    end
+
+    return eta * compromised_costs + response_costs
+end
+
 function generate_cost_matrix(X::Vector{Int}, U::Vector{Int},
     x_to_vec::Dict{Int,NTuple{N,Int}},
     u_to_vec::Dict{Int,NTuple{N,Int}},
