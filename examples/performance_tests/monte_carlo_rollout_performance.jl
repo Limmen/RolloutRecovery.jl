@@ -3,7 +3,7 @@ Pkg.activate(".")
 using RolloutRecovery
 using Statistics
 
-K = 7
+K = 3
 n = 1000
 eta = 0.2
 p_a = 0.05
@@ -16,14 +16,14 @@ A = RecoveryPOMDP.generate_erdos_renyi_graph(K, p_c)
 println("Num states: $(2^K), num controls: $(2^K)")
 
 alpha = 0.95
-lookahead_horizon = 1
+lookahead_horizon = 0
 rollout_horizon = 5
 num_simulations = 10
-T = 1
+T = 100
 num_lookahead_samples = 10
-num_particles = 50
-eval_samples = 1
-threshold = 0.25
+num_particles = 1
+eval_samples = 100
+threshold = 0.9
 
 println("Running rollout simulation with T=$T time steps, eval_samples=$eval_samples...")
 println("Parameters: alpha=$alpha, lookahead_horizon=$lookahead_horizon, rollout_horizon=$rollout_horizon, num_simulations=$num_simulations")

@@ -146,16 +146,25 @@ function generate_erdos_renyi_graph(K::Int, p_c::Float64)::Matrix{Int}
 end
 
 function cost_function(x::Int, u::Int, x_to_vec::Dict{Int,NTuple{N,Int}},
-    u_to_vec::Dict{Int,NTuple{N,Int}}, eta::Float64)::Float64 where N
+    u_to_vec::Dict{Int,NTuple{N,Int}}, eta::Float64, lambda::Float64 = 2.0)::Float64 where N
     """
-    Compute the cost c(x,u) combining compromise and response costs
+    Compute the cost g(i,u,j) based on the mathematical definition:
+    g(i,u,j) = λφ(i) + Σ(s=1 to N) m^s(1-u^s) + u^s(1-i^s)
+    
+    Where:
+    - λ is a weighting factor for the downtime cost
+    - φ(i) = 1 if total compromised servers > threshold f, 0 otherwise
+    - m^s represents the failure cost for server s
+    - The sum includes both failure costs and recovery costs
+    - f is defined as (N-1)/2 where N is the number of replicas
 
     Args:
     - x: State index
     - u: Control index
     - x_to_vec: Dictionary mapping state index to state vector
     - u_to_vec: Dictionary mapping control index to control vector  
-    - eta: Weight parameter for compromised costs
+    - eta: Weight parameter for failure costs (m^s)
+    - lambda: Weight parameter for downtime cost
 
     Returns:
     - Total weighted cost
@@ -163,38 +172,75 @@ function cost_function(x::Int, u::Int, x_to_vec::Dict{Int,NTuple{N,Int}},
     x_vec = x_to_vec[x]
     u_vec = u_to_vec[u]
 
-    compromised_costs = 0.0
-    response_costs = 0.0
-
+    # Define threshold f as (N-1)/2
+    f = div(N - 1, 2)
+    
+    # Count total compromised servers
+    total_compromised = sum(x_vec)
+    
+    # Downtime cost: λφ(i) where φ(i) = 1 if total compromised > f
+    downtime_cost = lambda * (total_compromised > f ? 1.0 : 0.0)
+    
+    # Failure and recovery costs: Σ(s=1 to N) m^s(1-u^s) + u^s(1-i^s)
+    failure_recovery_costs = 0.0
+    
     @inbounds for i in 1:N
-        compromised_costs += x_vec[i] * (1 - u_vec[i])
-        response_costs += u_vec[i]
+        # Failure cost: m^s(1-u^s) - cost when server is not being recovered
+        failure_cost = eta * (1 - u_vec[i])
+        
+        # Recovery cost: u^s(1-i^s) - cost when taking recovery action on healthy server
+        recovery_cost = u_vec[i] * (1 - x_vec[i])
+        
+        failure_recovery_costs += failure_cost + recovery_cost
     end
 
-    return eta * compromised_costs + response_costs
+    return downtime_cost + failure_recovery_costs
 end
 
-function compute_cost(x_vec::NTuple{K,Int}, u_vec::NTuple{K,Int}, eta::Float64)::Float64 where K
+function compute_cost(x_vec::NTuple{K,Int}, u_vec::NTuple{K,Int}, eta::Float64, lambda::Float64 = 2.0)::Float64 where K
     """
-    Compute the cost c(x,u) combining compromise and response costs using state and control vectors directly
+    Compute the cost g(i,u,j) based on the mathematical definition:
+    g(i,u,j) = λφ(i) + Σ(s=1 to N) m^s(1-u^s) + u^s(1-i^s)
+    
+    Where:
+    - λ is a weighting factor for the downtime cost
+    - φ(i) = 1 if total compromised servers > threshold f, 0 otherwise
+    - m^s represents the failure cost for server s
+    - The sum includes both failure costs and recovery costs
+    - f is defined as (K-1)/2 where K is the number of replicas
 
     Args:
-    - x_vec: State vector (K-tuple of 0s and 1s)
-    - u_vec: Control vector (K-tuple of 0s and 1s)
-    - eta: Weight parameter for compromised costs
+    - x_vec: State vector (K-tuple of 0s and 1s, where 1 = compromised)
+    - u_vec: Control vector (K-tuple of 0s and 1s, where 1 = recovery action)
+    - eta: Weight parameter for failure costs (m^s)
+    - lambda: Weight parameter for downtime cost
 
     Returns:
     - Total weighted cost
     """
-    compromised_costs = 0.0
-    response_costs = 0.0
-
+    # Define threshold f as (K-1)/2
+    f = div(K - 1, 2)
+    
+    # Count total compromised servers
+    total_compromised = sum(x_vec)
+    
+    # Downtime cost: λφ(i) where φ(i) = 1 if total compromised > f
+    downtime_cost = lambda * (total_compromised > f ? 1.0 : 0.0)
+    
+    # Failure and recovery costs: Σ(s=1 to N) m^s(1-u^s) + u^s(1-i^s)
+    failure_recovery_costs = 0.0
+    
     @inbounds for i in 1:K
-        compromised_costs += x_vec[i] * (1 - u_vec[i])
-        response_costs += u_vec[i]
+        # Failure cost: m^s(1-u^s) - cost when server is not being recovered
+        failure_cost = eta * (1 - u_vec[i])
+        
+        # Recovery cost: u^s(1-i^s) - cost when taking recovery action on healthy server
+        recovery_cost = u_vec[i] * (1 - x_vec[i])
+        
+        failure_recovery_costs += failure_cost + recovery_cost
     end
 
-    return eta * compromised_costs + response_costs
+    return downtime_cost + failure_recovery_costs
 end
 
 function generate_cost_matrix(X::Vector{Int}, U::Vector{Int},

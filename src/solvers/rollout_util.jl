@@ -35,7 +35,7 @@ function rollout_policy(b::Vector{Float64}, U::Vector{Int}, X::Vector{Int}, O::V
     best_value = Inf
 
     @inbounds for (i, u) in enumerate(U)
-        println("Evaluating control $i/$(length(U))...")
+        #println("Evaluating control $i/$(length(U))...")
         q_value = compute_q_value(b, u, U, X, O, P, Z, C, x_to_vec, u_to_vec, vec_to_u,
             alpha, lookahead_horizon, rollout_horizon, num_simulations, threshold)
 

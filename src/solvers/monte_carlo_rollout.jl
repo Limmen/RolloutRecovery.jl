@@ -36,7 +36,7 @@ function rollout_policy(particles, weights, K, n, A, p_a, eta, alpha,
     for u_vec in Iterators.product(fill(0:1, K)...)
         control_count += 1
         remaining = total_controls - control_count + 1
-        println("Evaluating control vector $control_count/$total_controls ($(remaining-1) remaining): $u_vec")
+        #println("Evaluating control vector $control_count/$total_controls ($(remaining-1) remaining): $u_vec")
         
         u_tuple = Tuple(u_vec)
         q_value = compute_q_value(particles, weights, u_tuple, K,
@@ -275,9 +275,14 @@ function run_rollout_simulation(initial_state_vec, K, n, A, p_a, eta,
                 
         if sample % 1 == 0 || sample == eval_samples
             current_avg = sum(total_costs[1:sample]) / sample
-            println("Sample $sample/$eval_samples, Current average cost: $(round(current_avg, digits=4))")
+            current_std = sqrt(sum((total_costs[1:sample] .- current_avg).^2) / sample)
+            println("Sample $sample/$eval_samples, Current average cost: $(round(current_avg, digits=4)), Std dev: $(round(current_std, digits=4))")
         end
     end
 
-    return sum(total_costs) / eval_samples
+    final_avg = sum(total_costs) / eval_samples
+    final_std = sqrt(sum((total_costs .- final_avg).^2) / eval_samples)
+    println("Final results: Average cost: $(round(final_avg, digits=4)), Standard deviation: $(round(final_std, digits=4))")
+    
+    return final_avg
 end

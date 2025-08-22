@@ -3,6 +3,7 @@ Pkg.activate(".")
 using RolloutRecovery
 using Statistics
 using JLD2, FileIO
+using Flux
 
 K = 10
 n = 1000
@@ -31,16 +32,24 @@ T = 100
 num_lookahead_samples = 10
 num_particles = 50
 eval_samples = 100
-threshold = 0.9
+
+model_file = "./models/imitation_model_K$(K).jld2"
+if !isfile(model_file)
+    error("Trained model not found: $model_file\nPlease train the model first using the imitation learning script.")
+end
+
+println("Loading trained model from: $model_file")
+@load model_file model
 
 println("Running rollout simulation with T=$T time steps, eval_samples=$eval_samples...")
 println("Parameters: alpha=$alpha, lookahead_horizon=$lookahead_horizon, rollout_horizon=$rollout_horizon, num_simulations=$num_simulations")
+println("Using trained neural network model as base policy")
 println("Using adjacency matrix from: $graph_file")
 
 start_time = time()
-average_cost = MonteCarloRolloutMultiagentAsync.run_rollout_simulation(initial_state_vec, K, n, A, p_a, 
+average_cost = MonteCarloRolloutAutonomousMultiagent.run_rollout_simulation(initial_state_vec, K, n, A, p_a, 
                                                       alpha, lookahead_horizon, rollout_horizon, 
-                                                      num_simulations, num_lookahead_samples, num_particles, T, eval_samples, threshold, eta)
+                                                      num_simulations, num_lookahead_samples, num_particles, T, eval_samples, model, eta)
 end_time = time()
 execution_time = end_time - start_time
 

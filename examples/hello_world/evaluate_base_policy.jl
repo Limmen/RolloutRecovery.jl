@@ -3,11 +3,11 @@ Pkg.activate(".")
 using RolloutRecovery
 using Distributions
 
-K = 2
+K = 4
 n = 10
 eta = 0.25
-p_a = 0.1
-p_c = 0.1
+p_a = 0.05
+p_c = 0.5
 
 X, x_to_vec, vec_to_x = RecoveryPOMDP.generate_state_space(K)
 U, u_to_vec, vec_to_u, U_local = RecoveryPOMDP.generate_control_space(K)

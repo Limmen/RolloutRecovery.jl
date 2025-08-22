@@ -3,11 +3,11 @@ Pkg.activate(".")
 using RolloutRecovery
 using Statistics
 
-K = 3
-n = 200
+K = 4
+n = 5
 eta = 0.2
-p_a = 0.1
-p_c = 0.1
+p_a = 0.05
+p_c = 0.5
 
 X, x_to_vec, vec_to_x = RecoveryPOMDP.generate_state_space(K)
 U, u_to_vec, vec_to_u, U_local = RecoveryPOMDP.generate_control_space(K)
@@ -25,9 +25,9 @@ alpha = 0.95
 lookahead_horizon = 0
 rollout_horizon = 5
 num_simulations = 10
-T = 1
-eval_samples = 1
-threshold = 0.5
+T = 100
+eval_samples = 100
+threshold = 0.9
 
 println("Running rollout simulation with T=$T time steps, eval_samples=$eval_samples...")
 println("Parameters: alpha=$alpha, lookahead_horizon=$lookahead_horizon, rollout_horizon=$rollout_horizon, num_simulations=$num_simulations")

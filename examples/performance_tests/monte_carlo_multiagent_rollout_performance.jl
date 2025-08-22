@@ -2,8 +2,9 @@ using Pkg
 Pkg.activate(".")
 using RolloutRecovery
 using Statistics
+using JLD2, FileIO
 
-K = 33
+K = 40
 n = 1000
 eta = 0.2
 p_a = 0.05
@@ -12,17 +13,26 @@ p_c = 0.5
 initial_state_vec = tuple(zeros(Int, K)...)  
 A = RecoveryPOMDP.generate_erdos_renyi_graph(K, p_c)
 
+# Load adjacency matrix from graphs folder
+#graph_file = "./graphs/$(K)_A.jld2"
+#if !isfile(graph_file)
+    #error("Adjacency matrix file not found: $graph_file\nPlease run the data collection script first to generate the graph.")
+#end
+
+#println("Loading adjacency matrix from: $graph_file")
+#@load graph_file A
+
 println("K=$K components")
 
 alpha = 0.95
-lookahead_horizon = 1
+lookahead_horizon = 0
 rollout_horizon = 5
 num_simulations = 10
-T = 1
+T = 100
 num_lookahead_samples = 10
 num_particles = 50
-eval_samples = 1
-threshold = 0.25
+eval_samples = 100
+threshold = 0.9
 
 println("Running rollout simulation with T=$T time steps, eval_samples=$eval_samples...")
 println("Parameters: alpha=$alpha, lookahead_horizon=$lookahead_horizon, rollout_horizon=$rollout_horizon, num_simulations=$num_simulations")
